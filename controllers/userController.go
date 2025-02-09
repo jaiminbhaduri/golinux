@@ -27,7 +27,7 @@ func Login() gin.HandlerFunc {
 
 		// Bind JSON payload to struct
 		if err := c.BindJSON(&body); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"message": "invalid json format", "error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"msg": "invalid json format", "error": err.Error()})
 			return
 		}
 
@@ -149,12 +149,29 @@ func Listuser() gin.HandlerFunc {
 	}
 }
 
+type AddUserBody struct {
+	User    string `json:"user"`
+	Home    string `json:"home"`
+	Shell   int    `json:"shell"`
+	Name    string `json:"name"`
+	Comment string `json:"comment"`
+}
+
 func Adduser() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		fmt.Println("adduser")
+		var body AddUserBody
+
+		// Bind JSON payload to struct
+		if err := c.BindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"msg": "invalid json format", "error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"msg": "User created", "data": body})
 	}
 }
 
+// Delete a linux user
 func Deluser() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		fmt.Println("deluser")
