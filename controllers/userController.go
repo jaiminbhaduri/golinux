@@ -1,9 +1,11 @@
 package controllers
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/user"
 	"regexp"
 	"slices"
@@ -108,21 +110,21 @@ func Listuser() gin.HandlerFunc {
 		// Open and read /etc/passwd efficiently
 		data, err := os.ReadFile("/etc/passwd")
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read system users"})
+			c.JSON(http.StatusInternalServerError, gin.H{"msg": "Failed to read system users", "error": err})
 			return
 		}
 
 		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 		totalUsers := len(lines)
 		if totalUsers == 0 {
-			c.JSON(http.StatusOK, gin.H{"data": []string{}, "message": "No users found"})
+			c.JSON(http.StatusOK, gin.H{"msg": "No users found"})
 			return
 		}
 
 		// Compute pagination indices
 		startIndex := (page - 1) * limit
 		if startIndex >= totalUsers {
-			c.JSON(http.StatusOK, gin.H{"data": []string{}, "message": "No more users"})
+			c.JSON(http.StatusOK, gin.H{"msg": "No more users"})
 			return
 		}
 
@@ -150,11 +152,17 @@ func Listuser() gin.HandlerFunc {
 }
 
 type AddUserBody struct {
-	User    string `json:"user"`
-	Home    string `json:"home"`
-	Shell   int    `json:"shell"`
-	Name    string `json:"name"`
-	Comment string `json:"comment"`
+	User      string `json:"user"`
+	HomeDir   string `json:"home"`
+	Password  string `json:"password"`
+	Cpassword string `json:"cpassword"`
+	Shell     string `json:"shell"`
+	Comment   string `json:"comment"`
+	//Expiry     time.Time `json:"expiry"`
+	NoLogInit  bool `json:"no_log_init"`
+	NoHome     bool `json:"no_home"`
+	SystemUser bool `json:"system_user"`
+	Uid        int  `json:"uid"`
 }
 
 func Adduser() gin.HandlerFunc {
@@ -167,13 +175,116 @@ func Adduser() gin.HandlerFunc {
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{"msg": "User created", "data": body})
+		if body.Password != body.Cpassword {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Password and Confirm Password does not match"})
+			return
+		}
+
+		// sudoUsers, err := helpers.GetSudoUsers()
+		// if err != nil {
+		// 	c.JSON(http.StatusBadRequest, gin.H{"msg": "error fetching sudo users", "error": err.Error()})
+		// 	return
+		// }
+
+		//shells, err := helpers.GetShells()
+
+		args := []string{body.User, "-s", body.Shell}
+
+		if body.Comment != "" {
+			args = append(args, "-c", body.Comment)
+		}
+
+		if body.NoHome {
+			args = append(args, "-M")
+		} else if body.HomeDir != "" {
+			args = append(args, "-d", body.HomeDir)
+		} else {
+			args = append(args, "-m")
+		}
+
+		if body.Uid > 0 {
+			args = append(args, "-u", strconv.Itoa(body.Uid))
+		}
+
+		if body.SystemUser {
+			args = append(args, "-r")
+		}
+
+		if body.NoLogInit {
+			args = append(args, "-l")
+		}
+
+		var output bytes.Buffer
+		var stderr bytes.Buffer
+
+		cmd := exec.Command("useradd", args...)
+		cmd.Stderr = &stderr // Capture errors
+		cmd.Stdout = &output
+
+		if err := cmd.Run(); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error(), "exit_code": cmd.ProcessState.ExitCode(), "msg": stderr.String()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"msg": "User created", "exit_code": cmd.ProcessState.ExitCode(), "output": output.String()})
 	}
 }
 
+type DelUsers struct {
+	Users      []string `json:"users"`
+	RemoveHome bool     `json:"remove_home"`
+}
+
 // Delete a linux user
-func Deluser() gin.HandlerFunc {
+func Delusers() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		fmt.Println("deluser")
+		var body DelUsers
+
+		// Bind JSON payload to struct
+		if err := c.BindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"msg": "invalid json format", "error": err.Error()})
+			return
+		}
+
+		if len(body.Users) == 0 {
+			c.JSON(400, gin.H{"error": "no users provided"})
+			return
+		}
+
+		var args []string
+		if body.RemoveHome {
+			args = append(args, "-r")
+		}
+
+		response := make(map[string]any)
+
+		for _, user := range body.Users {
+			cmdArgs := append(args, user)
+
+			cmd := exec.Command("userdel", cmdArgs...)
+
+			var output bytes.Buffer
+			var stderr bytes.Buffer
+			cmd.Stdout = &output
+			cmd.Stderr = &stderr
+
+			err := cmd.Run()
+			exitCode := cmd.ProcessState.ExitCode() // Get the exit code
+
+			userData := map[string]interface{}{
+				"exit_code": exitCode,
+				"output":    output.String(),
+				"error":     stderr.String(),
+				"status":    "success",
+			}
+
+			if err != nil {
+				userData["status"] = "failed"
+			}
+
+			response[user] = userData
+		}
+
+		c.JSON(http.StatusOK, gin.H{"msg": "Done", "response": response})
 	}
 }

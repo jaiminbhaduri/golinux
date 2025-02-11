@@ -14,6 +14,6 @@ func UserRoutes(router *gin.Engine) {
 		user.POST("/logout", controllers.Logout())
 		user.GET("/listuser", controllers.Listuser())
 		user.POST("/adduser", controllers.Adduser())
-		user.POST("/deluser", controllers.Deluser())
+		user.DELETE("/deluser", controllers.Delusers())
 	}
 }

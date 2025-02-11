@@ -62,3 +62,53 @@ func VerifyPassword(username, password string) (bool, error) {
 	// Compare hashes
 	return strings.TrimSpace(output.String()) == hashedPassword, nil
 }
+
+func GetSudoUsers() ([]string, error) {
+	// Open and read /etc/group file
+	data, err := os.ReadFile("/etc/group")
+	if err != nil {
+		return []string{}, err
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	var sudoUsers []string
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+
+		if strings.HasPrefix(line, "sudo:") {
+			parts := strings.Split(line, ":")
+
+			if parts[3] != "" {
+				sudoUsers = strings.Split(parts[3], ",")
+			}
+
+			break
+		}
+	}
+
+	return sudoUsers, nil
+}
+
+func GetShells() ([]string, error) {
+	// Open and read /etc/shells file
+	data, err := os.ReadFile("/etc/shells")
+	if err != nil {
+		return []string{}, err
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	var shells []string
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		shells = append(shells, line)
+	}
+
+	return shells, nil
+}
