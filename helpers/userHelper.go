@@ -112,3 +112,42 @@ func GetShells() ([]string, error) {
 
 	return shells, nil
 }
+
+func SetUserPasswd(user, password, cpassword string) (string, int, error) {
+	if user == "" {
+		return "User missing", 1, errors.New("user missing")
+	}
+
+	if password != cpassword {
+		return "Passwords not matching", 1, errors.New("password and Confirm password not matching")
+	}
+
+	if password == "" {
+		return "Empty passwords", 1, errors.New("passwords cannot be empty")
+	}
+
+	cmd := exec.Command("passwd", user)
+
+	// Get a pipe to write to the command's standard input
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return "Stdin error while setting user password", 1, err
+	}
+
+	// Write password twice (for confirmation)
+	go func() {
+		defer stdin.Close()
+		io.WriteString(stdin, password+"\n")
+		io.WriteString(stdin, cpassword+"\n")
+	}()
+
+	var output bytes.Buffer
+	var cmdErr error
+	cmd.Stdout = &output
+
+	if err := cmd.Run(); err != nil {
+		cmdErr = err
+	}
+
+	return output.String(), cmd.ProcessState.ExitCode(), cmdErr
+}

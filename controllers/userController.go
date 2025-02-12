@@ -226,7 +226,33 @@ func Adduser() gin.HandlerFunc {
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{"msg": "User created", "exit_code": cmd.ProcessState.ExitCode(), "output": output.String()})
+		resp := make(map[string]any)
+
+		resp["user_creation"] = map[string]any{
+			"msg":       "User created",
+			"exit_code": cmd.ProcessState.ExitCode(),
+			"output":    output.String(),
+		}
+
+		if body.Password != "" && body.Cpassword != "" {
+			passwdOutput, exitcode, err := helpers.SetUserPasswd(body.User, body.Password, body.Cpassword)
+
+			// Initialize "passwd" as a map
+			passwdData := map[string]any{
+				"exit_code": exitcode,
+				"output":    passwdOutput,
+			}
+
+			// Add error field only if there's an error
+			if err != nil {
+				passwdData["error"] = err.Error()
+			}
+
+			// Assign passwdData to resp["passwd"]
+			resp["passwd"] = passwdData
+		}
+
+		c.JSON(http.StatusOK, resp)
 	}
 }
 
