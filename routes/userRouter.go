@@ -15,5 +15,6 @@ func UserRoutes(router *gin.Engine) {
 		user.GET("/listuser", controllers.Listuser())
 		user.POST("/adduser", controllers.Adduser())
 		user.DELETE("/deluser", controllers.Delusers())
+		//user.PUT("/changeUserPasswd", controllers.SetUserPasswd())
 	}
 }

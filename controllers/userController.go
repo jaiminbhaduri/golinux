@@ -235,7 +235,7 @@ func Adduser() gin.HandlerFunc {
 		}
 
 		if body.Password != "" && body.Cpassword != "" {
-			passwdOutput, exitcode, err := helpers.SetUserPasswd(body.User, body.Password, body.Cpassword)
+			passwdOutput, exitcode, err := helpers.SetUserPasswd(&body.User, &body.Password, &body.Cpassword)
 
 			// Initialize "passwd" as a map
 			passwdData := map[string]any{

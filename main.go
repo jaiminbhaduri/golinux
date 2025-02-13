@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/jaiminbhaduri/golinux/db"
 	"github.com/jaiminbhaduri/golinux/helpers"
 	"github.com/jaiminbhaduri/golinux/routes"
 
@@ -22,6 +23,9 @@ func main() {
 	if err := godotenv.Load(".env"); err != nil {
 		log.Fatal("Error loading env file")
 	}
+
+	// Connect db
+	db.Db()
 
 	ip := os.Getenv("IP")
 	port := os.Getenv("PORT")
