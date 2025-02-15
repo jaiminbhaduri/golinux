@@ -13,7 +13,9 @@ import (
 	"strings"
 
 	"github.com/jaiminbhaduri/golinux/config"
+	"github.com/jaiminbhaduri/golinux/db"
 	"github.com/jaiminbhaduri/golinux/helpers"
+	"github.com/jaiminbhaduri/golinux/models"
 
 	"github.com/gin-gonic/gin"
 )
@@ -53,7 +55,7 @@ func Login() gin.HandlerFunc {
 		uid, _ := strconv.Atoi(userObj.Uid)
 		//gid, _ := strconv.Atoi(userObj.Gid)
 
-		// System users cannot login
+		// System users cannot login (Root user can login)
 		if slices.Contains(config.ReservedUsers, username) || (uid != 0 && uid < 1000) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Reserved user"})
 			return
@@ -159,8 +161,6 @@ type AddUserBody struct {
 	Shell     string `json:"shell"`
 	Comment   string `json:"comment"`
 	//Expiry     time.Time `json:"expiry"`
-	NoLogInit  bool `json:"no_log_init"`
-	NoHome     bool `json:"no_home"`
 	SystemUser bool `json:"system_user"`
 	Uid        int  `json:"uid"`
 }
@@ -186,17 +186,23 @@ func Adduser() gin.HandlerFunc {
 		// 	return
 		// }
 
-		//shells, err := helpers.GetShells()
+		shells, err := helpers.GetShells()
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"msg": "error fetching shells", "error": err.Error()})
+			return
+		}
 
-		args := []string{body.User, "-s", body.Shell}
+		args := []string{body.User}
+
+		if body.Shell != "" && slices.Contains(shells, body.Shell) {
+			args = append(args, "-s", body.Shell)
+		}
 
 		if body.Comment != "" {
 			args = append(args, "-c", body.Comment)
 		}
 
-		if body.NoHome {
-			args = append(args, "-M")
-		} else if body.HomeDir != "" {
+		if body.HomeDir != "" {
 			args = append(args, "-d", body.HomeDir)
 		} else {
 			args = append(args, "-m")
@@ -210,46 +216,23 @@ func Adduser() gin.HandlerFunc {
 			args = append(args, "-r")
 		}
 
-		if body.NoLogInit {
-			args = append(args, "-l")
-		}
-
-		var output bytes.Buffer
-		var stderr bytes.Buffer
-
-		cmd := exec.Command("useradd", args...)
-		cmd.Stderr = &stderr // Capture errors
-		cmd.Stdout = &output
-
-		if err := cmd.Run(); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error(), "exit_code": cmd.ProcessState.ExitCode(), "msg": stderr.String()})
-			return
-		}
-
 		resp := make(map[string]any)
 
-		resp["user_creation"] = map[string]any{
-			"msg":       "User created",
-			"exit_code": cmd.ProcessState.ExitCode(),
-			"output":    output.String(),
+		userData := models.User{
+			User:       body.User,
+			Shell:      body.Shell,
+			Comment:    body.Comment,
+			SystemUser: body.SystemUser,
 		}
 
-		if body.Password != "" && body.Cpassword != "" {
-			passwdOutput, exitcode, err := helpers.SetUserPasswd(&body.User, &body.Password, &body.Cpassword)
+		// Linux user creation response
+		resp["user_creation"] = helpers.Useradd(&userData, &args)
 
-			// Initialize "passwd" as a map
-			passwdData := map[string]any{
-				"exit_code": exitcode,
-				"output":    passwdOutput,
+		if userCreation, ok := resp["user_creation"].(map[string]any); ok {
+			if _, exists := userCreation["error"]; !exists && body.Password != "" && body.Cpassword != "" {
+				// Linux user password setting response
+				resp["passwd"] = helpers.SetUserPasswd(&body.User, &body.Password, &body.Cpassword)
 			}
-
-			// Add error field only if there's an error
-			if err != nil {
-				passwdData["error"] = err.Error()
-			}
-
-			// Assign passwdData to resp["passwd"]
-			resp["passwd"] = passwdData
 		}
 
 		c.JSON(http.StatusOK, resp)
@@ -310,6 +293,27 @@ func Delusers() gin.HandlerFunc {
 
 			response[user] = userData
 		}
+
+		// Get db client
+		dbClient, _ := db.GetDB()
+
+		// Delete the users from db
+		output, delErr := models.DeleteUsers(dbClient, &body.Users)
+		response["dboutput"] = output
+		response["dberror"] = delErr
+
+		c.JSON(http.StatusOK, gin.H{"msg": "Done", "response": response})
+	}
+}
+
+func RebuildUserdb() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		response := make(map[string]any)
+
+		// Rebuild the users db
+		output, err := models.Rebuild_users_db()
+		response["dboutput"] = output
+		response["dberror"] = err
 
 		c.JSON(http.StatusOK, gin.H{"msg": "Done", "response": response})
 	}

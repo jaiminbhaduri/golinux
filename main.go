@@ -25,7 +25,7 @@ func main() {
 	}
 
 	// Connect db
-	db.Db()
+	db.Initdb()
 
 	ip := os.Getenv("IP")
 	port := os.Getenv("PORT")

@@ -7,7 +7,12 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/user"
+	"strconv"
 	"strings"
+
+	"github.com/jaiminbhaduri/golinux/db"
+	"github.com/jaiminbhaduri/golinux/models"
 )
 
 // Function to verify the user's password
@@ -98,7 +103,7 @@ func GetShells() ([]string, error) {
 	}
 
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	var shells []string
+	shells := []string{"/usr/sbin/nologin"}
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -113,17 +118,25 @@ func GetShells() ([]string, error) {
 	return shells, nil
 }
 
-func SetUserPasswd(user, password, cpassword *string) (string, int, error) {
-	if *user == "" {
-		return "User missing", 1, errors.New("user missing")
+func SetUserPasswd(user, password, cpassword *string) map[string]any {
+	// Helper function to return error response quickly
+	setError := func(msg string) map[string]any {
+		return map[string]any{
+			"error":     msg,
+			"exit_code": 1,
+		}
 	}
 
-	if *password != *cpassword {
-		return "Passwords not matching", 1, errors.New("password and Confirm password not matching")
+	if *user == "" {
+		return setError("User missing")
 	}
 
 	if *password == "" {
-		return "Empty passwords", 1, errors.New("passwords cannot be empty")
+		return setError("Passwords missing")
+	}
+
+	if *password != *cpassword {
+		return setError("Password and Confirm password not matching")
 	}
 
 	cmd := exec.Command("passwd", *user)
@@ -131,7 +144,7 @@ func SetUserPasswd(user, password, cpassword *string) (string, int, error) {
 	// Get a pipe to write to the command's standard input
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return "Stdin error while setting user password", 1, err
+		return setError(err.Error())
 	}
 
 	// Write password twice (for confirmation)
@@ -142,12 +155,56 @@ func SetUserPasswd(user, password, cpassword *string) (string, int, error) {
 	}()
 
 	var output bytes.Buffer
-	var cmdErr error
 	cmd.Stdout = &output
 
+	var cmdErr string
 	if err := cmd.Run(); err != nil {
-		cmdErr = err
+		cmdErr = err.Error()
 	}
 
-	return output.String(), cmd.ProcessState.ExitCode(), cmdErr
+	return map[string]any{
+		"output":    output.String(),
+		"exit_code": cmd.ProcessState.ExitCode(),
+		"error":     cmdErr,
+	}
+}
+
+func Useradd(userData *models.User, args *[]string) map[string]any {
+	var output bytes.Buffer
+	var stderr bytes.Buffer
+
+	cmd := exec.Command("useradd", *args...)
+	cmd.Stderr = &stderr // Capture errors
+	cmd.Stdout = &output
+
+	err := cmd.Run()
+	resp := map[string]any{
+		"msg":       "User created",
+		"exit_code": cmd.ProcessState.ExitCode(),
+	}
+
+	if err != nil {
+		resp["error"] = err.Error()
+		resp["msg"] = stderr.String()
+		return resp
+	}
+
+	// Look up the user in OS
+	userObj, _ := user.Lookup(userData.User)
+
+	userData.HomeDir = userObj.HomeDir
+	userData.Uid, _ = strconv.Atoi(userObj.Uid)
+	userData.Gid, _ = strconv.Atoi(userObj.Gid)
+
+	// Get db client
+	dbClient, _ := db.GetDB()
+
+	// Delete the user from db if exists
+	models.DeleteUsers(dbClient, &[]string{userData.User})
+
+	// Save user in db
+	resp["dboutput"], resp["dberror"] = models.SaveUser(dbClient, *userData)
+
+	resp["output"] = output.String()
+	return resp
 }
