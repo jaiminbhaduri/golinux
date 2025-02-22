@@ -2,6 +2,7 @@ package routes
 
 import (
 	"github.com/jaiminbhaduri/golinux/controllers"
+	"github.com/jaiminbhaduri/golinux/middleware"
 
 	"github.com/gin-gonic/gin"
 )
@@ -9,7 +10,7 @@ import (
 func UserRoutes(router *gin.Engine) {
 	router.POST("/user/login", controllers.Login())
 
-	user := router.Group("/user")
+	user := router.Group("/user", middleware.AuthMiddleware(), middleware.CheckUserExists())
 	{
 		user.POST("/logout", controllers.Logout())
 		user.GET("/listuser", controllers.Listuser())

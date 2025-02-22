@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jaiminbhaduri/golinux/db"
 	"github.com/jaiminbhaduri/golinux/models"
 )
@@ -195,6 +196,7 @@ func Useradd(userData *models.User, args *[]string) map[string]any {
 	userData.HomeDir = userObj.HomeDir
 	userData.Uid, _ = strconv.Atoi(userObj.Uid)
 	userData.Gid, _ = strconv.Atoi(userObj.Gid)
+	userData.Uuid = uuid.New().String()
 
 	// Get db client
 	dbClient, _ := db.GetDB()

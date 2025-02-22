@@ -2,7 +2,7 @@ package controllers
 
 import (
 	"bytes"
-	"fmt"
+	"context"
 	"net/http"
 	"os"
 	"os/exec"
@@ -16,6 +16,7 @@ import (
 	"github.com/jaiminbhaduri/golinux/db"
 	"github.com/jaiminbhaduri/golinux/helpers"
 	"github.com/jaiminbhaduri/golinux/models"
+	"go.mongodb.org/mongo-driver/bson"
 
 	"github.com/gin-gonic/gin"
 )
@@ -73,24 +74,59 @@ func Login() gin.HandlerFunc {
 			return
 		}
 
+		// Get db client
+		db, _ := db.GetDB()
+
+		filter := bson.M{"user": body.Username}
+		var result bson.M
+
+		// Retrieve the user's document from db
+		doc := db.Collection("users").FindOne(context.TODO(), filter)
+
+		// Decode the document
+		if err := doc.Decode(&result); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error(), "msg": "Problem finding record in db"})
+			return
+		}
+
+		res_user, _ := result["user"].(string)
+		res_uid, _ := result["uid"].(int32)
+		res_uuid, _ := result["uuid"].(string)
+
+		login := models.Login{
+			User: res_user,
+			Uid:  res_uid,
+			Uuid: res_uuid,
+		}
+
+		models.SaveLogin(db, &login)
+
 		// Set UID and GID
 		// if err := syscall.Setgid(gid); err != nil {
 		// 	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		// 	return
 		// }
-
 		// if err := syscall.Setuid(uid); err != nil {
 		// 	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		// 	return
 		// }
 
-		c.JSON(http.StatusOK, gin.H{"msg": "Login success", "data": userObj})
+		c.JSON(http.StatusOK, gin.H{"msg": "Login success"})
 	}
 }
 
 func Logout() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		fmt.Println("logout")
+		userinfoRaw, _ := c.Get("userinfo")
+		userinfo, _ := userinfoRaw.(bson.M)
+
+		user, _ := userinfo["user"].(string)
+		users := []string{user}
+
+		db, _ := db.GetDB()
+		output, _ := models.DeleteLogins(db, &users)
+
+		c.JSON(http.StatusOK, gin.H{"msg": "Logout successful", "dboutput": output})
 	}
 }
 

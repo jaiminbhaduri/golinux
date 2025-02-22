@@ -6,20 +6,24 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jaiminbhaduri/golinux/db"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 // Define the User structure to match MongoDB schema
 type User struct {
-	User       string `bson:"user"`
-	HomeDir    string `bson:"home"`
-	Shell      string `bson:"shell"`
-	Comment    string `bson:"comment"`
-	SystemUser bool   `bson:"system_user"`
-	Uid        int    `bson:"uid"`
-	Gid        int    `bson:"gid"`
+	ID         primitive.ObjectID `json:"_id,omitempty" bson:"_id,omitempty"`
+	User       string             `json:"user"`
+	HomeDir    string             `json:"home,omitempty"`
+	Shell      string             `json:"shell,omitempty"`
+	Comment    string             `json:"comment,omitempty"`
+	SystemUser bool               `json:"system_user"`
+	Uid        int                `json:"uid"`
+	Gid        int                `json:"gid"`
+	Uuid       string             `json:"uuid"`
 }
 
 // SaveUser inserts a user into the "users" collection
@@ -37,6 +41,10 @@ func DeleteUsers(db *mongo.Database, users *[]string) (*mongo.DeleteResult, erro
 	filter := bson.M{"user": bson.M{"$in": users}}
 
 	output, err := collection.DeleteMany(context.TODO(), filter)
+
+	// Delete records from logins table
+	DeleteLogins(db, users)
+
 	return output, err
 }
 
@@ -72,6 +80,7 @@ func Rebuild_users_db() (*mongo.InsertManyResult, error) {
 			SystemUser: systemuser,
 			Uid:        uid,
 			Gid:        gid,
+			Uuid:       uuid.New().String(),
 		}
 
 		// Append to batch insert list
@@ -81,7 +90,7 @@ func Rebuild_users_db() (*mongo.InsertManyResult, error) {
 	// Get db client
 	dbClient, _ := db.GetDB()
 
-	// Truncate the users collection
+	// Delete the users collection
 	dbClient.Collection("users").Drop(context.TODO())
 
 	// Inserts sample documents into the collection
