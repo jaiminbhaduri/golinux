@@ -138,61 +138,41 @@ func Logout() gin.HandlerFunc {
 	}
 }
 
-func Listuser() gin.HandlerFunc {
+func Listusers() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		db, _ := db.GetDB()
+		collection := db.Collection("users")
+
 		// Parse limit and page with default values
-		limit, err := strconv.Atoi(c.DefaultQuery("limit", "10"))
-		if err != nil || limit <= 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value"})
-			return
-		}
+		//limitStr := c.DefaultQuery("limit", "")
+		//pageStr := c.DefaultQuery("page", "")
 
-		page, err := strconv.Atoi(c.DefaultQuery("page", "1"))
-		if err != nil || page <= 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid page value"})
-			return
-		}
-
-		// Open and read /etc/passwd efficiently
-		data, err := os.ReadFile("/etc/passwd")
+		// Count total users in the collection
+		totalUsers, err := collection.CountDocuments(context.TODO(), bson.M{})
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"msg": "Failed to read system users", "error": err})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count users"})
 			return
 		}
 
-		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-		totalUsers := len(lines)
-		if totalUsers == 0 {
-			c.JSON(http.StatusOK, gin.H{"msg": "No users found"})
+		cursor, err := collection.Find(context.TODO(), bson.M{})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
-		// Compute pagination indices
-		startIndex := (page - 1) * limit
-		if startIndex >= totalUsers {
-			c.JSON(http.StatusOK, gin.H{"msg": "No more users"})
+		// Unpack the cursor into a slice
+		var results []bson.M
+		if err = cursor.All(context.TODO(), &results); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
-		endIndex := startIndex + limit
-		if endIndex > totalUsers {
-			endIndex = totalUsers
-		}
-
-		// Extract and format users
-		users := make([][]string, 0, endIndex-startIndex)
-		for _, line := range lines[startIndex:endIndex] {
-			slice := strings.Split(line, ":")
-			slice = append(slice[:1], slice[2:]...) // Extract relevant fields
-			users = append(users, slice)
-		}
-
-		// Return paginated result
+		// Response JSON with pagination metadata
 		c.JSON(http.StatusOK, gin.H{
-			"data":  users,
-			"page":  page,
-			"limit": limit,
-			"total": totalUsers,
+			"total_users": totalUsers,
+			//"limit":       limit,
+			//"page":        page,
+			"data": results,
 		})
 	}
 }

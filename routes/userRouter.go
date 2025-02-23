@@ -18,7 +18,7 @@ func UserRoutes(router *gin.Engine) {
 		// Only root user allowed to access below APIs
 		root := user.Group("/", middleware.IsRoot())
 		{
-			root.GET("/listuser", controllers.Listuser())
+			root.GET("/listuser", controllers.Listusers())
 			root.POST("/adduser", controllers.Adduser())
 			root.DELETE("/deluser", controllers.Delusers())
 			root.GET("/userlogins", controllers.Userlogins())
