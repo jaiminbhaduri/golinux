@@ -366,3 +366,15 @@ func Userlogins() gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{"data": results})
 	}
 }
+
+func Apilist() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		data, err := os.ReadFile("/var/log/golinux/access.log")
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"msg": "Failed to read log file", "error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"data": data})
+	}
+}
