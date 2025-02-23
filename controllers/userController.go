@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"os"
 	"os/exec"
@@ -21,6 +22,19 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+func RebuildUserdb() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		response := make(map[string]any)
+
+		// Rebuild the users db
+		output, err := models.Rebuild_users_db()
+		response["dboutput"] = output
+		response["dberror"] = err
+
+		c.JSON(http.StatusOK, gin.H{"msg": "Done", "response": response})
+	}
+}
 
 type LoginStruct struct {
 	Username string `json:"username"`
@@ -353,15 +367,22 @@ func Delusers() gin.HandlerFunc {
 	}
 }
 
-func RebuildUserdb() gin.HandlerFunc {
+func Userlogins() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		response := make(map[string]any)
+		db, _ := db.GetDB()
+		cursor, err := db.Collection("logins").Find(context.TODO(), bson.M{})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 
-		// Rebuild the users db
-		output, err := models.Rebuild_users_db()
-		response["dboutput"] = output
-		response["dberror"] = err
+		// Unpacks the cursor into a slice
+		var results []any
+		if err = cursor.All(context.TODO(), &results); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 
-		c.JSON(http.StatusOK, gin.H{"msg": "Done", "response": response})
+		c.JSON(http.StatusOK, gin.H{"data": results})
 	}
 }
