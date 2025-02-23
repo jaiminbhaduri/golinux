@@ -8,15 +8,20 @@ import (
 )
 
 func UserRoutes(router *gin.Engine) {
-	router.POST("/user/login", controllers.Login())
+	router.POST("/user/rebuild_users_db", controllers.RebuildUserdb())
+	router.POST("/user/login", middleware.CheckUserInOS(), middleware.CheckUserInDB(), controllers.Login())
 
-	user := router.Group("/user", middleware.AuthMiddleware(), middleware.CheckUserExists())
+	user := router.Group("/user", middleware.AuthMiddleware(), middleware.CheckUserInOS(), middleware.CheckUserInDB(), middleware.CheckUserInLogins())
 	{
 		user.POST("/logout", controllers.Logout())
-		user.GET("/listuser", controllers.Listuser())
-		user.POST("/adduser", controllers.Adduser())
-		user.DELETE("/deluser", controllers.Delusers())
-		user.POST("/rebuild_users_db", controllers.RebuildUserdb())
-		//user.PUT("/changeUserPasswd", controllers.SetUserPasswd())
+
+		// Only root user allowed to access below APIs
+		root := user.Group("/", middleware.IsRoot())
+		{
+			root.GET("/listuser", controllers.Listuser())
+			root.POST("/adduser", controllers.Adduser())
+			root.DELETE("/deluser", controllers.Delusers())
+			//root.PUT("/changeUserPasswd", controllers.SetUserPasswd())
+		}
 	}
 }

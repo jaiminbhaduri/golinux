@@ -11,10 +11,10 @@ import (
 )
 
 // JWT Claims structure
-type Claims struct {
-	User string `json:"user"`
-	Uid  int    `json:"uid"`
-	Uuid string `json:"uuid"`
+type ClaimsStruct struct {
+	User     string `json:"user"`
+	LoginUid string `json:"loginuid"`
+	Uuid     string `json:"uuid"`
 	jwt.RegisteredClaims
 }
 
@@ -36,7 +36,7 @@ func AuthMiddleware() gin.HandlerFunc {
 		tokenString := strings.TrimPrefix(bearerToken, "Bearer ")
 
 		// Parse token
-		claims := &Claims{}
+		claims := &ClaimsStruct{}
 		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])

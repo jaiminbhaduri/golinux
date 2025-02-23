@@ -2,16 +2,17 @@ package controllers
 
 import (
 	"bytes"
-	"context"
 	"net/http"
 	"os"
 	"os/exec"
-	"os/user"
-	"regexp"
+	osuser "os/user"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"github.com/jaiminbhaduri/golinux/config"
 	"github.com/jaiminbhaduri/golinux/db"
 	"github.com/jaiminbhaduri/golinux/helpers"
@@ -21,14 +22,22 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type LoginRequest struct {
+type LoginStruct struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 }
 
+// Claims structure
+type LoginClaims struct {
+	Uuid     string `json:"uuid"`
+	LoginUid string `json:"loginuid"`
+	User     string `json:"user"`
+	jwt.RegisteredClaims
+}
+
 func Login() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var body LoginRequest
+		var body LoginStruct
 
 		// Bind JSON payload to struct
 		if err := c.BindJSON(&body); err != nil {
@@ -36,25 +45,12 @@ func Login() gin.HandlerFunc {
 			return
 		}
 
-		// Trim the whitespaces from username
-		username := strings.Trim(body.Username, " ")
+		userdocRaw, _ := c.Get("userdoc")
+		userdoc, _ := userdocRaw.(bson.M)
 
-		// User input validation
-		if matched, _ := regexp.MatchString(`^[a-zA-Z0-9_-]+$`, username); !matched {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Username format"})
-			return
-		}
-
-		// Check if user exists in linux system
-		userObj, err := user.Lookup(username)
-		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			return
-		}
-
-		// Convert uid & gid from string to integer
-		uid, _ := strconv.Atoi(userObj.Uid)
-		//gid, _ := strconv.Atoi(userObj.Gid)
+		uid, _ := userdoc["uid"].(int32)
+		username, _ := userdoc["user"].(string)
+		userUuid, _ := userdoc["uuid"].(string)
 
 		// System users cannot login (Root user can login)
 		if slices.Contains(config.ReservedUsers, username) || (uid != 0 && uid < 1000) {
@@ -63,7 +59,7 @@ func Login() gin.HandlerFunc {
 		}
 
 		// Check if password is correct
-		ok, err := helpers.VerifyPassword(body.Username, body.Password)
+		ok, err := helpers.VerifyPassword(username, body.Password)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -74,31 +70,32 @@ func Login() gin.HandlerFunc {
 			return
 		}
 
-		// Get db client
-		db, _ := db.GetDB()
+		newLoginUid := uuid.New().String()
+		login_duration_str := os.Getenv("MAX_LOGIN_DURATION")
+		login_duration, _ := strconv.Atoi(login_duration_str)
 
-		filter := bson.M{"user": body.Username}
-		var result bson.M
+		currtime := time.Now().UTC()
+		exptime := time.Now().UTC().Add(time.Duration(login_duration) * time.Hour)
 
-		// Retrieve the user's document from db
-		doc := db.Collection("users").FindOne(context.TODO(), filter)
-
-		// Decode the document
-		if err := doc.Decode(&result); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error(), "msg": "Problem finding record in db"})
+		// Generate jwt
+		token, tokenErr := helpers.GenerateToken(userUuid, newLoginUid, username, currtime, exptime)
+		if tokenErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error(), "msg": "token creation error"})
 			return
 		}
 
-		res_user, _ := result["user"].(string)
-		res_uid, _ := result["uid"].(int32)
-		res_uuid, _ := result["uuid"].(string)
-
 		login := models.Login{
-			User: res_user,
-			Uid:  res_uid,
-			Uuid: res_uuid,
+			User:      username,
+			Uuid:      userUuid,
+			UserAgent: c.GetHeader("User-Agent"),
+			Mac:       helpers.GetMacAddress(),
+			Ip:        helpers.GetIPAddress(c),
+			LoginUid:  newLoginUid,
+			LoginAt:   currtime,
+			Exptime:   exptime,
 		}
 
+		db, _ := db.GetDB()
 		models.SaveLogin(db, &login)
 
 		// Set UID and GID
@@ -111,20 +108,17 @@ func Login() gin.HandlerFunc {
 		// 	return
 		// }
 
-		c.JSON(http.StatusOK, gin.H{"msg": "Login success"})
+		c.JSON(http.StatusOK, gin.H{"msg": "Login success", "data": token})
 	}
 }
 
 func Logout() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		userinfoRaw, _ := c.Get("userinfo")
-		userinfo, _ := userinfoRaw.(bson.M)
-
-		user, _ := userinfo["user"].(string)
-		users := []string{user}
+		logindocRaw, _ := c.Get("logindoc")
+		logindoc, _ := logindocRaw.(bson.M)
 
 		db, _ := db.GetDB()
-		output, _ := models.DeleteLogins(db, &users)
+		output, _ := models.LogoutDeletion(db, logindoc)
 
 		c.JSON(http.StatusOK, gin.H{"msg": "Logout successful", "dboutput": output})
 	}
@@ -189,7 +183,7 @@ func Listuser() gin.HandlerFunc {
 	}
 }
 
-type AddUserBody struct {
+type AddUserStruct struct {
 	User      string `json:"user"`
 	HomeDir   string `json:"home"`
 	Password  string `json:"password"`
@@ -203,7 +197,7 @@ type AddUserBody struct {
 
 func Adduser() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var body AddUserBody
+		var body AddUserStruct
 
 		// Bind JSON payload to struct
 		if err := c.BindJSON(&body); err != nil {
@@ -275,15 +269,15 @@ func Adduser() gin.HandlerFunc {
 	}
 }
 
-type DelUsers struct {
+type DelUsersStruct struct {
 	Users      []string `json:"users"`
 	RemoveHome bool     `json:"remove_home"`
 }
 
-// Delete a linux user
+// Delete linux user/s
 func Delusers() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var body DelUsers
+		var body DelUsersStruct
 
 		// Bind JSON payload to struct
 		if err := c.BindJSON(&body); err != nil {
@@ -303,9 +297,21 @@ func Delusers() gin.HandlerFunc {
 
 		response := make(map[string]any)
 
-		for _, user := range body.Users {
-			cmdArgs := append(args, user)
+		var usersToDelete []string
 
+		for _, user := range body.Users {
+			user = strings.TrimSpace(user)
+			userObj, _ := osuser.Lookup(user)
+			if userObj != nil {
+				uid, _ := strconv.Atoi(userObj.Uid)
+
+				// Restrict System users deletion
+				if slices.Contains(config.ReservedUsers, user) || uid < 1000 {
+					continue
+				}
+			}
+
+			cmdArgs := append(args, user)
 			cmd := exec.Command("userdel", cmdArgs...)
 
 			var output bytes.Buffer
@@ -327,6 +333,11 @@ func Delusers() gin.HandlerFunc {
 				userData["status"] = "failed"
 			}
 
+			// 0 for successful deletion, 6 for user not found in OS
+			if exitCode == 0 || exitCode == 6 {
+				usersToDelete = append(usersToDelete, user)
+			}
+
 			response[user] = userData
 		}
 
@@ -334,7 +345,7 @@ func Delusers() gin.HandlerFunc {
 		dbClient, _ := db.GetDB()
 
 		// Delete the users from db
-		output, delErr := models.DeleteUsers(dbClient, &body.Users)
+		output, delErr := models.DeleteUsers(dbClient, &usersToDelete)
 		response["dboutput"] = output
 		response["dberror"] = delErr
 

@@ -10,7 +10,9 @@ import (
 	"os/user"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/jaiminbhaduri/golinux/db"
 	"github.com/jaiminbhaduri/golinux/models"
@@ -67,56 +69,6 @@ func VerifyPassword(username, password string) (bool, error) {
 
 	// Compare hashes
 	return strings.TrimSpace(output.String()) == hashedPassword, nil
-}
-
-func GetSudoUsers() ([]string, error) {
-	// Open and read /etc/group file
-	data, err := os.ReadFile("/etc/group")
-	if err != nil {
-		return []string{}, err
-	}
-
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	var sudoUsers []string
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-
-		if strings.HasPrefix(line, "sudo:") {
-			parts := strings.Split(line, ":")
-
-			if parts[3] != "" {
-				sudoUsers = strings.Split(parts[3], ",")
-			}
-
-			break
-		}
-	}
-
-	return sudoUsers, nil
-}
-
-func GetShells() ([]string, error) {
-	// Open and read /etc/shells file
-	data, err := os.ReadFile("/etc/shells")
-	if err != nil {
-		return []string{}, err
-	}
-
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	shells := []string{"/usr/sbin/nologin"}
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-
-		if strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		shells = append(shells, line)
-	}
-
-	return shells, nil
 }
 
 func SetUserPasswd(user, password, cpassword *string) map[string]any {
@@ -209,4 +161,40 @@ func Useradd(userData *models.User, args *[]string) map[string]any {
 
 	resp["output"] = output.String()
 	return resp
+}
+
+// Claims structure
+type LoginClaims struct {
+	Uuid     string `json:"uuid"`
+	LoginUid string `json:"loginuid"`
+	User     string `json:"user"`
+	jwt.RegisteredClaims
+}
+
+// Generate JWT Token
+func GenerateToken(uuid, loginUid, user string, currtime, exptime time.Time) (string, error) {
+	secretkey := os.Getenv("SECRET_KEY")
+	jwtSecret := []byte(secretkey)
+
+	// Create claims
+	claims := LoginClaims{
+		Uuid:     uuid,
+		LoginUid: loginUid,
+		User:     user,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(exptime),
+			IssuedAt:  jwt.NewNumericDate(currtime),
+		},
+	}
+
+	// Generate token with claims
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	// Sign the token with secret key
+	tokenString, err := token.SignedString(jwtSecret)
+	if err != nil {
+		return "", err
+	}
+
+	return tokenString, nil
 }
