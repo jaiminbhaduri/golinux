@@ -8,8 +8,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/jaiminbhaduri/golinux/config"
 	"github.com/jaiminbhaduri/golinux/db"
-	"github.com/jaiminbhaduri/golinux/helpers"
 	"github.com/jaiminbhaduri/golinux/routes"
 
 	"github.com/gin-gonic/gin"
@@ -18,7 +18,7 @@ import (
 
 func main() {
 	// In case of termination, clean up and shut down
-	defer helpers.Shutdown()
+	defer config.Shutdown()
 
 	if err := godotenv.Load(".env"); err != nil {
 		log.Fatal("Error loading env file")
