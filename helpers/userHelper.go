@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/uuid"
 	"github.com/jaiminbhaduri/golinux/db"
+	"github.com/jaiminbhaduri/golinux/middleware"
 	"github.com/jaiminbhaduri/golinux/models"
 )
 
@@ -45,7 +45,7 @@ func VerifyPassword(username, password string) (bool, error) {
 		return false, errors.New("no password found for user")
 	}
 
-	// Python script to compare password with shadow file hashed password
+	// Python command to compare password with shadow file hashed password
 	cmd := exec.Command("python3", "-c", "import crypt; print(crypt.crypt(input(), input()))")
 
 	stdin, err := cmd.StdinPipe()
@@ -148,7 +148,6 @@ func Useradd(userData *models.User, args *[]string) map[string]any {
 	userData.HomeDir = userObj.HomeDir
 	userData.Uid, _ = strconv.Atoi(userObj.Uid)
 	userData.Gid, _ = strconv.Atoi(userObj.Gid)
-	userData.Uuid = uuid.New().String()
 
 	// Get db client
 	dbClient, _ := db.GetDB()
@@ -163,24 +162,16 @@ func Useradd(userData *models.User, args *[]string) map[string]any {
 	return resp
 }
 
-// Claims structure
-type LoginClaims struct {
-	Uuid     string `json:"uuid"`
-	LoginUid string `json:"loginuid"`
-	User     string `json:"user"`
-	jwt.RegisteredClaims
-}
-
 // Generate JWT Token
-func GenerateToken(uuid, loginUid, user string, currtime, exptime time.Time) (string, error) {
+func GenerateToken(userid, loginid, user string, currtime, exptime time.Time) (string, error) {
 	secretkey := os.Getenv("SECRET_KEY")
 	jwtSecret := []byte(secretkey)
 
 	// Create claims
-	claims := LoginClaims{
-		Uuid:     uuid,
-		LoginUid: loginUid,
-		User:     user,
+	claims := middleware.ClaimsStruct{
+		Userid:  userid,
+		Loginid: loginid,
+		User:    user,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(exptime),
 			IssuedAt:  jwt.NewNumericDate(currtime),

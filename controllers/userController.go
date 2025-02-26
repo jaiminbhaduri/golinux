@@ -12,13 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/uuid"
 	"github.com/jaiminbhaduri/golinux/config"
 	"github.com/jaiminbhaduri/golinux/db"
 	"github.com/jaiminbhaduri/golinux/helpers"
 	"github.com/jaiminbhaduri/golinux/models"
-	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"github.com/gin-gonic/gin"
 )
@@ -41,14 +39,6 @@ type LoginStruct struct {
 	Password string `json:"password"`
 }
 
-// Claims structure
-type LoginClaims struct {
-	Uuid     string `json:"uuid"`
-	LoginUid string `json:"loginuid"`
-	User     string `json:"user"`
-	jwt.RegisteredClaims
-}
-
 func Login() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var body LoginStruct
@@ -60,20 +50,16 @@ func Login() gin.HandlerFunc {
 		}
 
 		userdocRaw, _ := c.Get("userdoc")
-		userdoc, _ := userdocRaw.(bson.M)
-
-		uid, _ := userdoc["uid"].(int32)
-		username, _ := userdoc["user"].(string)
-		userUuid, _ := userdoc["uuid"].(string)
+		userdoc, _ := userdocRaw.(models.User)
 
 		// System users cannot login (Root user can login)
-		if slices.Contains(config.ReservedUsers, username) || (uid != 0 && uid < 1000) {
+		if slices.Contains(config.ReservedUsers, userdoc.User) || (userdoc.Uid != 0 && userdoc.Uid < 1000) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Reserved user"})
 			return
 		}
 
 		// Check if password is correct
-		ok, err := helpers.VerifyPassword(username, body.Password)
+		ok, err := helpers.VerifyPassword(userdoc.User, body.Password)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -84,45 +70,40 @@ func Login() gin.HandlerFunc {
 			return
 		}
 
-		newLoginUid := uuid.New().String()
 		login_duration_str := os.Getenv("MAX_LOGIN_DURATION")
 		login_duration, _ := strconv.Atoi(login_duration_str)
 
 		currtime := time.Now().UTC()
 		exptime := time.Now().UTC().Add(time.Duration(login_duration) * time.Hour)
 
-		// Generate jwt
-		token, tokenErr := helpers.GenerateToken(userUuid, newLoginUid, username, currtime, exptime)
-		if tokenErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error(), "msg": "token creation error"})
-			return
-		}
-
-		login := models.Login{
-			User:      username,
-			Uuid:      userUuid,
+		login := models.LoginStruct{
+			User:      userdoc.User,
+			Userid:    userdoc.ID.Hex(),
 			UserAgent: c.GetHeader("User-Agent"),
 			Mac:       helpers.GetMacAddress(),
 			Ip:        helpers.GetIPAddress(c),
-			LoginUid:  newLoginUid,
 			LoginAt:   currtime,
 			Exptime:   exptime,
 		}
 
 		db, _ := db.GetDB()
-		models.SaveLogin(db, &login)
+		dboutput, dberr := models.SaveLogin(db, &login)
+		if dberr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"msg": "Login db error", "error": dberr.Error()})
+			return
+		}
 
-		// Set UID and GID
-		// if err := syscall.Setgid(gid); err != nil {
-		// 	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		// 	return
-		// }
-		// if err := syscall.Setuid(uid); err != nil {
-		// 	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		// 	return
-		// }
+		insertedLoginId, _ := dboutput.InsertedID.(bson.ObjectID)
+		insertedId := insertedLoginId.Hex()
 
-		c.JSON(http.StatusOK, gin.H{"msg": "Login success", "data": token})
+		// Generate jwt
+		token, tokenErr := helpers.GenerateToken(userdoc.ID.Hex(), insertedId, userdoc.User, currtime, exptime)
+		if tokenErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error(), "msg": "token creation error"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"msg": "Login success", "data": token, "dboutput": dboutput, "dberror": dberr})
 	}
 }
 
@@ -142,27 +123,29 @@ func Listusers() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		db, _ := db.GetDB()
 		collection := db.Collection("users")
+		ctx, cancel := context.WithTimeout(context.Background(), 9*time.Second)
+		defer cancel()
 
 		// Parse limit and page with default values
 		//limitStr := c.DefaultQuery("limit", "")
 		//pageStr := c.DefaultQuery("page", "")
 
 		// Count total users in the collection
-		totalUsers, err := collection.CountDocuments(context.TODO(), bson.M{})
+		totalUsers, err := collection.CountDocuments(ctx, bson.M{})
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count users"})
 			return
 		}
 
-		cursor, err := collection.Find(context.TODO(), bson.M{})
+		cursor, err := collection.Find(ctx, bson.M{})
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
 		// Unpack the cursor into a slice
-		var results []bson.M
-		if err = cursor.All(context.TODO(), &results); err != nil {
+		var results []any
+		if err = cursor.All(ctx, &results); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -349,8 +332,10 @@ func Delusers() gin.HandlerFunc {
 
 func Userlogins() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(context.Background(), 9*time.Second)
+		defer cancel()
 		db, _ := db.GetDB()
-		cursor, err := db.Collection("logins").Find(context.TODO(), bson.M{})
+		cursor, err := db.Collection("logins").Find(ctx, bson.M{})
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -358,7 +343,7 @@ func Userlogins() gin.HandlerFunc {
 
 		// Unpacks the cursor into a slice
 		var results []any
-		if err = cursor.All(context.TODO(), &results); err != nil {
+		if err = cursor.All(ctx, &results); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -367,7 +352,7 @@ func Userlogins() gin.HandlerFunc {
 	}
 }
 
-func Apilist() gin.HandlerFunc {
+func Accesslogs() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		data, err := os.ReadFile("/var/log/golinux/access.log")
 		if err != nil {

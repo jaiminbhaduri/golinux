@@ -3,22 +3,22 @@ package db
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"os"
+	"time"
 
-	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 )
 
 var client *mongo.Client // Global client variable
 
 // Initdb initializes the database connection and stores the client
-func Initdb() {
+func Initdb() error {
 	var uri string
 	if uri = os.Getenv("MONGODB_URI"); uri == "" {
-		log.Fatal("You must set your 'MONGODB_URI' environment variable.")
+		return errors.New("you must set your 'MONGODB_URI' environment variable")
 	}
 
 	// Set MongoDB options
@@ -29,15 +29,18 @@ func Initdb() {
 	var err error
 	client, err = mongo.Connect(opts)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
 	// Send a ping to confirm a successful connection
-	var result bson.M
-	if err := client.Database("golinux").RunCommand(context.TODO(), bson.M{"ping": 1}).Decode(&result); err != nil {
-		panic(err)
+	if err := client.Ping(ctx, readpref.Primary()); err != nil {
+		return err
 	}
-	fmt.Println("Pinged your deployment. You successfully connected to db!")
+
+	return nil
 }
 
 // GetDB returns the database instance
@@ -51,7 +54,9 @@ func GetDB() (*mongo.Database, error) {
 // CloseDB closes the database connection
 func CloseDB() {
 	if client != nil {
-		_ = client.Disconnect(context.TODO())
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		client.Disconnect(ctx)
 		log.Println("Disconnected from db")
 	}
 }

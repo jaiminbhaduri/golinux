@@ -9,7 +9,7 @@ import (
 
 func UserRoutes(router *gin.Engine) {
 	router.POST("/user/rebuild_users_db", controllers.RebuildUserdb())
-	router.POST("/user/login", middleware.CheckUserInOS(), middleware.CheckUserInDB(), controllers.Login())
+	router.POST("/user/login", middleware.CheckUserExists(), controllers.Login())
 
 	user := router.Group("/user", middleware.AuthMiddleware(), middleware.CheckUserInOS(), middleware.CheckUserInDB(), middleware.CheckUserInLogins())
 	{
@@ -22,7 +22,7 @@ func UserRoutes(router *gin.Engine) {
 			root.POST("/adduser", controllers.Adduser())
 			root.DELETE("/deluser", controllers.Delusers())
 			root.GET("/userlogins", controllers.Userlogins())
-			root.GET("/apilist", controllers.Apilist())
+			root.GET("/accesslogs", controllers.Accesslogs())
 			//root.PUT("/changeUserPasswd", controllers.SetUserPasswd())
 		}
 	}

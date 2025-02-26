@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"io"
 	"log"
 	"os"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/jaiminbhaduri/golinux/config"
 	"github.com/jaiminbhaduri/golinux/db"
+	"github.com/jaiminbhaduri/golinux/middleware"
 	"github.com/jaiminbhaduri/golinux/routes"
 
 	"github.com/gin-gonic/gin"
@@ -25,7 +25,9 @@ func main() {
 	}
 
 	// Connect db
-	db.Initdb()
+	if err := db.Initdb(); err != nil {
+		log.Fatal(err)
+	}
 
 	ip := os.Getenv("IP")
 	port := os.Getenv("PORT")
@@ -47,8 +49,7 @@ func main() {
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.New()
-	router.Use(gin.Logger())
-	router.Use(gin.Recovery())
+	router.Use(gin.Logger(), gin.Recovery(), middleware.ApiLogger())
 	router.SetTrustedProxies([]string{ip})
 
 	//router.Use(middleware.Errorlogs())
@@ -58,7 +59,7 @@ func main() {
 	// Run the server in a goroutine
 	go func() {
 		if err := router.Run(ip + ":" + port); err != nil {
-			log.Fatal("Failed to start server:", err)
+			log.Fatal(err)
 		}
 	}()
 
@@ -66,7 +67,9 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
+	log.Println("Server started on port", port)
+
 	// Block until signal is received
 	sig := <-sigChan
-	fmt.Println("Received signal:", sig)
+	log.Println("Received signal:", sig)
 }

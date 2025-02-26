@@ -10,14 +10,14 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jaiminbhaduri/golinux/db"
 	"github.com/jaiminbhaduri/golinux/models"
-	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // JWT Claims structure
 type ClaimsStruct struct {
-	User     string `json:"user"`
-	LoginUid string `json:"loginuid"`
-	Uuid     string `json:"uuid"`
+	User    string `json:"user"`
+	Loginid string `json:"loginid"`
+	Userid  string `json:"userid"`
 	jwt.RegisteredClaims
 }
 
@@ -50,9 +50,9 @@ func AuthMiddleware() gin.HandlerFunc {
 		// Handle invalid token
 		if err != nil || !token.Valid {
 			logindoc := bson.M{
-				"user":     claims.User,
-				"loginuid": claims.LoginUid,
-				"uuid":     claims.Uuid,
+				"user":    claims.User,
+				"loginid": claims.Loginid,
+				"userid":  claims.Userid,
 			}
 
 			db, _ := db.GetDB()
@@ -76,6 +76,9 @@ func AuthMiddleware() gin.HandlerFunc {
 
 		// Add extracted data to the request context
 		c.Set("claims", claims)
+		c.Set("user", claims.User)
+		c.Set("loginid", claims.Loginid)
+		c.Set("userid", claims.Userid)
 
 		// Continue to the next handler
 		c.Next()
