@@ -17,6 +17,7 @@ import (
 	"github.com/jaiminbhaduri/golinux/helpers"
 	"github.com/jaiminbhaduri/golinux/models"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/gin-gonic/gin"
 )
@@ -127,17 +128,30 @@ func Listusers() gin.HandlerFunc {
 		defer cancel()
 
 		// Parse limit and page with default values
-		//limitStr := c.DefaultQuery("limit", "")
-		//pageStr := c.DefaultQuery("page", "")
+		limitStr := c.DefaultQuery("limit", "")
+		pageStr := c.DefaultQuery("page", "")
 
-		// Count total users in the collection
-		totalUsers, err := collection.CountDocuments(ctx, bson.M{})
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count users"})
-			return
+		var limit, page int
+		var err error
+		var cursor *mongo.Cursor
+
+		// If limit and page are provided, parse them
+		if limitStr != "" && pageStr != "" {
+			limit, _ = strconv.Atoi(limitStr)
+			page, _ = strconv.Atoi(pageStr)
 		}
 
-		cursor, err := collection.Find(ctx, bson.M{})
+		// If no pagination, return all users
+		if limit > 0 && page > 0 {
+			skip := (page - 1) * limit
+			skipStage := bson.D{{Key: "$skip", Value: skip}}
+			limitStage := bson.D{{Key: "$limit", Value: limit}}
+			cursor, err = collection.Aggregate(ctx, mongo.Pipeline{skipStage, limitStage})
+
+		} else {
+			cursor, err = collection.Find(ctx, bson.M{})
+		}
+
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -152,10 +166,9 @@ func Listusers() gin.HandlerFunc {
 
 		// Response JSON with pagination metadata
 		c.JSON(http.StatusOK, gin.H{
-			"total_users": totalUsers,
-			//"limit":       limit,
-			//"page":        page,
-			"data": results,
+			"limit": limit,
+			"page":  page,
+			"data":  results,
 		})
 	}
 }
