@@ -153,10 +153,10 @@ func Useradd(userData *models.User, args *[]string) map[string]any {
 	dbClient, _ := db.GetDB()
 
 	// Delete the user from db if exists
-	models.DeleteUsers(dbClient, &[]string{userData.User})
+	db.DeleteUsers(dbClient, &[]string{userData.User})
 
 	// Save user in db
-	resp["dboutput"], resp["dberror"] = models.SaveUser(dbClient, *userData)
+	resp["dboutput"], resp["dberror"] = db.SaveUser(dbClient, *userData)
 
 	resp["output"] = output.String()
 	return resp

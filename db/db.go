@@ -40,6 +40,14 @@ func Initdb() error {
 		return err
 	}
 
+	dbclient, _ := GetDB()
+
+	// Ensure TTL index is set
+	err = EnsureTTLIndex(dbclient)
+	if err != nil {
+		log.Println("Failed to create TTL index:", err)
+	}
+
 	return nil
 }
 

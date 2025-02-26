@@ -37,8 +37,8 @@ func ApiLogger() gin.HandlerFunc {
 			Body:      string(bodyBytes),
 		}
 
-		db, _ := db.GetDB()
-		if _, err := models.SaveApi(db, apiLog); err != nil {
+		dbclient, _ := db.GetDB()
+		if _, err := db.SaveApi(dbclient, apiLog); err != nil {
 			log.Println("Error while saving api in db:", err.Error())
 		}
 

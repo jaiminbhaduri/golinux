@@ -28,7 +28,7 @@ func RebuildUserdb() gin.HandlerFunc {
 		response := make(map[string]any)
 
 		// Rebuild the users db
-		output, err := models.Rebuild_users_db()
+		output, err := db.Rebuild_users_db()
 		response["dboutput"] = output
 		response["dberror"] = err
 
@@ -88,8 +88,8 @@ func Login() gin.HandlerFunc {
 			Exptime:   exptime,
 		}
 
-		db, _ := db.GetDB()
-		dboutput, dberr := models.SaveLogin(db, &login)
+		dbclient, _ := db.GetDB()
+		dboutput, dberr := db.SaveLogin(dbclient, &login)
 		if dberr != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"msg": "Login db error", "error": dberr.Error()})
 			return
@@ -114,8 +114,8 @@ func Logout() gin.HandlerFunc {
 		logindocRaw, _ := c.Get("logindoc")
 		logindoc, _ := logindocRaw.(bson.M)
 
-		db, _ := db.GetDB()
-		output, _ := models.LogoutDeletion(db, logindoc)
+		dbclient, _ := db.GetDB()
+		output, _ := db.LogoutDeletion(dbclient, logindoc)
 
 		c.JSON(http.StatusOK, gin.H{"msg": "Logout successful", "dboutput": output})
 	}
@@ -345,8 +345,8 @@ func Delusers() gin.HandlerFunc {
 		// Wait for all OS user deletions to complete
 		wg.Wait()
 
-		db, _ := db.GetDB()
-		output, delErr := models.DeleteUsers(db, &usersToDelete)
+		dbclient, _ := db.GetDB()
+		output, delErr := db.DeleteUsers(dbclient, &usersToDelete)
 
 		response["dboutput"] = output
 		if delErr != nil {

@@ -8,9 +8,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/jaiminbhaduri/golinux/db"
-	"github.com/jaiminbhaduri/golinux/models"
-	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // JWT Claims structure
@@ -49,27 +46,7 @@ func AuthMiddleware() gin.HandlerFunc {
 
 		// Handle invalid token
 		if err != nil || !token.Valid {
-			logindoc := bson.M{
-				"user":    claims.User,
-				"loginid": claims.Loginid,
-				"userid":  claims.Userid,
-			}
-
-			db, _ := db.GetDB()
-			var dberr string
-
-			// Delete login record from db
-			output, dberror := models.LogoutDeletion(db, logindoc)
-			if dberror != nil {
-				dberr = dberror.Error()
-			}
-
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"msg":      "Invalid token",
-				"error":    err.Error(),
-				"dboutput": output,
-				"dberror":  dberr,
-			})
+			c.JSON(http.StatusUnauthorized, gin.H{"msg": "Invalid token", "error": err.Error()})
 			c.Abort()
 			return
 		}
