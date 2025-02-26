@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jaiminbhaduri/golinux/config"
@@ -223,9 +224,7 @@ func Adduser() gin.HandlerFunc {
 		}
 
 		if body.HomeDir != "" {
-			args = append(args, "-d", body.HomeDir)
-		} else {
-			args = append(args, "-m")
+			args = append(args, "-m", "-d", body.HomeDir)
 		}
 
 		if body.Uid > 0 {
@@ -276,7 +275,7 @@ func Delusers() gin.HandlerFunc {
 		}
 
 		if len(body.Users) == 0 {
-			c.JSON(400, gin.H{"error": "no users provided"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "no users provided"})
 			return
 		}
 
@@ -285,60 +284,76 @@ func Delusers() gin.HandlerFunc {
 			args = append(args, "-r")
 		}
 
-		response := make(map[string]any)
+		var wg sync.WaitGroup
+		var mu sync.Mutex
 
-		var usersToDelete []string
+		response := make(map[string]interface{})
+		usersToDelete := []string{}
 
 		for _, user := range body.Users {
-			user = strings.TrimSpace(user)
-			userObj, _ := osuser.Lookup(user)
-			if userObj != nil {
-				uid, _ := strconv.Atoi(userObj.Uid)
+			wg.Add(1)
 
-				// Restrict System users deletion
-				if slices.Contains(config.ReservedUsers, user) || uid < 1000 {
-					continue
+			go func(username string) {
+				defer wg.Done()
+
+				username = strings.TrimSpace(username)
+				userObj, _ := osuser.Lookup(username)
+
+				// Skip system users and reserved users
+				if userObj != nil {
+					uid, _ := strconv.Atoi(userObj.Uid)
+					if slices.Contains(config.ReservedUsers, username) || uid < 1000 {
+						return
+					}
 				}
-			}
 
-			cmdArgs := append(args, user)
-			cmd := exec.Command("userdel", cmdArgs...)
+				cmdArgs := append(args, username)
+				cmd := exec.Command("userdel", cmdArgs...)
 
-			var output bytes.Buffer
-			var stderr bytes.Buffer
-			cmd.Stdout = &output
-			cmd.Stderr = &stderr
+				var output bytes.Buffer
+				var stderr bytes.Buffer
+				cmd.Stdout = &output
+				cmd.Stderr = &stderr
 
-			err := cmd.Run()
-			exitCode := cmd.ProcessState.ExitCode() // Get the exit code
+				err := cmd.Run()
+				exitCode := cmd.ProcessState.ExitCode() // Get exit code
 
-			userData := map[string]interface{}{
-				"exit_code": exitCode,
-				"output":    output.String(),
-				"error":     stderr.String(),
-				"status":    "success",
-			}
+				userData := map[string]interface{}{
+					"exit_code": exitCode,
+					"output":    output.String(),
+					"error":     stderr.String(),
+					"status":    "success",
+				}
 
-			if err != nil {
-				userData["status"] = "failed"
-			}
+				if err != nil {
+					userData["status"] = "failed"
+				}
 
-			// 0 for successful deletion, 6 for user not found in OS
-			if exitCode == 0 || exitCode == 6 {
-				usersToDelete = append(usersToDelete, user)
-			}
+				// 0 = successful deletion, 6 = user not found in OS
+				if exitCode == 0 || exitCode == 6 {
+					mu.Lock()
+					usersToDelete = append(usersToDelete, username)
+					mu.Unlock()
+				}
 
-			response[user] = userData
+				mu.Lock()
+				response[username] = userData
+				mu.Unlock()
+			}(user) // Pass user to goroutine
 		}
 
-		// Get db client
-		dbClient, _ := db.GetDB()
+		// Wait for all OS user deletions to complete
+		wg.Wait()
 
-		// Delete the users from db
-		output, delErr := models.DeleteUsers(dbClient, &usersToDelete)
+		db, _ := db.GetDB()
+		output, delErr := models.DeleteUsers(db, &usersToDelete)
+
 		response["dboutput"] = output
-		response["dberror"] = delErr
+		if delErr != nil {
+			response["dberror"] = delErr.Error()
+		}
 
+		// Send final response
 		c.JSON(http.StatusOK, gin.H{"msg": "Done", "response": response})
 	}
 }
